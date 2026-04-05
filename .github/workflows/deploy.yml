@@ -1,0 +1,47 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test-and-deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build binary
+        run: CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
+
+      - name: Build Docker image
+        run: docker build -t git-secret-scanner-backend:latest .
+
+      - name: Stop existing container
+        run: docker stop gss-backend 2>/dev/null || true && docker rm gss-backend 2>/dev/null || true
+
+      - name: Run container
+        run: |
+          docker run -d \
+            --name gss-backend \
+            --restart unless-stopped \
+            -p 8090:8080 \
+            -e AI_ANALYSIS_ENABLED=${{ secrets.AI_ANALYSIS_ENABLED || 'false' }} \
+            -e AI_PROVIDER=${{ secrets.AI_PROVIDER || 'anthropic' }} \
+            -e AI_API_KEY=${{ secrets.AI_API_KEY }} \
+            -e GITHUB_TOKEN=${{ secrets.GH_TOKEN }} \
+            -e FINDINGS_FILE=/data/findings.json \
+            -v /opt/gss-data:/data \
+            git-secret-scanner-backend:latest
+
+      - name: Health check
+        run: sleep 3 && curl -sf http://localhost:8090/health || exit 1
