@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -35,9 +36,10 @@ func (h *ScanHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		req.Provider = "github"
 	}
 
-	// Run scan in background goroutine
+	// Run scan in background goroutine using context.Background()
+	// r.Context() gets cancelled when the HTTP response is sent, before the scan completes.
 	go func() {
-		_ = h.svc.Run(r.Context(), req)
+		_ = h.svc.Run(context.Background(), req)
 	}()
 
 	w.Header().Set("Content-Type", "application/json")
