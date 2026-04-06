@@ -2,8 +2,11 @@ package provider
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/google/go-github/v60/github"
 	"golang.org/x/oauth2"
@@ -11,15 +14,40 @@ import (
 	"github.com/rhernandezba/git-secret-scanner/backend/internal/domain"
 )
 
+// newHTTPClient returns an HTTP client tuned for Docker/Alpine environments.
+// Disables HTTP/2 and sets explicit timeouts to avoid TLS handshake timeouts
+// caused by MTU mismatches in container networking.
+func newHTTPClient() *http.Client {
+	transport := &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		DisableCompression:  false,
+		ForceAttemptHTTP2:   false, // disable HTTP/2 to avoid MTU fragmentation issues
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   120 * time.Second,
+	}
+}
+
 type GitHubProvider struct {
 	client *github.Client
 }
 
 func NewGitHubProvider(token string) *GitHubProvider {
-	var httpClient *http.Client
+	httpClient := newHTTPClient()
 	if token != "" {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-		httpClient = oauth2.NewClient(context.Background(), ts)
+		httpClient.Transport = &oauth2.Transport{
+			Source: ts,
+			Base:   httpClient.Transport,
+		}
 	}
 	return &GitHubProvider{client: github.NewClient(httpClient)}
 }
